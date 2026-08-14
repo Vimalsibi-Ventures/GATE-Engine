@@ -1,0 +1,3 @@
+"""
+RTL Analyzer core package.
+"""

@@ -1,0 +1,23 @@
+# Virtual Environment
+venv/
+env/
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Generated Output Files
+rtl_analysis_output.json
+*.log
+*.fsdb
+*.vcd
+*.saif
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
