@@ -14,7 +14,7 @@ Multiple explicit files:
 
 Output
 ------
-results/<project_name>_YYYYMMDD_HHMMSS/
+gate_results_YYYYMMDD_HHMMSS/ (saved in the target project directory)
     rtl_analysis_output.json
     augmentation_report.json
     augmented_tb.sv
@@ -90,13 +90,9 @@ def derive_project_name(args: list[str], files: list[str]) -> str:
 
 # ── Results folder ────────────────────────────────────────────────────────────
 
-def make_results_dir(project_name: str, timestamp: str) -> str:
-    folder_name = f"{project_name}_{timestamp}"
-    out_dir = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "results",
-        folder_name,
-    )
+def make_results_dir(target_root: str, project_name: str, timestamp: str) -> str:
+    folder_name = f"gate_results_{timestamp}"
+    out_dir = os.path.join(target_root, folder_name)
     os.makedirs(out_dir, exist_ok=True)
     return out_dir
 
@@ -169,7 +165,12 @@ def main() -> None:
 
     project_name = derive_project_name(args, files)
     timestamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir      = make_results_dir(project_name, timestamp)
+    
+    # Determine the target root folder to drop results into
+    first_path = Path(args[0]).resolve()
+    target_root = str(first_path if first_path.is_dir() else first_path.parent)
+    
+    out_dir = make_results_dir(target_root, project_name, timestamp)
 
     print()
     print(f"  Project  : {project_name}")

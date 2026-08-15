@@ -1,6 +1,6 @@
 # GATE Engine (Gating Analysis & Targetted Exercise Engine)
 
-A comprehensive, two-phase Python CLI pipeline designed to automatically evaluate and optimize Clock-Gating Efficiency (CGE) in SystemVerilog designs.
+A comprehensive, two-phase Python CLI pipeline designed to automatically evaluate and optimize Clock-Gating Efficiency (CGE) in Verilog and SystemVerilog designs.
 
 The GATE Engine operates entirely locally without requiring a commercial synthesis tool. It structurally analyzes entire RTL project directories, resolves cross-module hierarchies, builds a strategic testing plan, and automatically synthesizes a SystemVerilog testbench specifically targeted to activate "starved" clock-gating conditions.
 
@@ -19,7 +19,7 @@ Extracts the "Anatomy" of the design.
 * **Dependency Mapping:** Automatically identifies FSM state registers, maps state transitions, and builds a complete register dependency graph.
 * **Output:** Generates `rtl_analysis_output.json`.
 
-### Phase 2: Testbench Augmentation (`augmentation/`)
+### Phase 2: Testbench Automation (`automation/`)
 
 Builds the "Battle Plan" and executes it.
 
@@ -44,7 +44,7 @@ GATE-Engine/
 │   ├── models.py               # Strict dataclasses for logic representation
 │   ├── slang_frontend.py       # pyslang wrapper and diagnostics
 │   └── utils.py                # Regex matchers & string manipulation
-└── augmentation/               # Phase 2: Testbench Generation
+└── automation/                 # Phase 2: Testbench Generation
     ├── classifier.py           # Signal controllability mapping
     ├── report.py               # Builds the strategic augmentation_report.json
     ├── generator.py            # Orchestrates testbench creation
@@ -82,12 +82,6 @@ The CLI handles single files, multiple explicit files, or entire directories rec
 python main.py path/to/design.sv
 ```
 
-### Analyze multiple specific files
-
-```bash
-python main.py file1.sv file2.sv file3.v
-```
-
 ### Analyze an entire RTL project directory *(Recommended)*
 
 ```bash
@@ -98,10 +92,10 @@ python main.py path/to/rtl_project/
 
 ## 📤 Outputs Generated
 
-Every run generates a timestamped session folder containing the three core outputs:
+Aligning with standard EDA workflows, the engine generates a timestamped session folder **directly inside your target project directory** (not inside the engine's repository).
 
 ```text
-results/<project_name>_YYYYMMDD_HHMMSS/
+<target_project_directory>/gate_results_YYYYMMDD_HHMMSS/
 ├── rtl_analysis_output.json    # The raw structural logic extraction
 ├── augmentation_report.json    # The refined controllability plan
 └── augmented_tb.sv             # The ready-to-run targeted testbench

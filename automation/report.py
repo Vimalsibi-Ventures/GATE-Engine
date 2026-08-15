@@ -38,6 +38,7 @@ Report structure
 import json
 import os
 from datetime import datetime
+import re
 from typing import Dict, Any, List, Optional
 
 from .classifier import classify_condition_signals
@@ -51,8 +52,8 @@ def _detect_clock_reset(modules: List[Dict]) -> tuple:
     module's port list.  Returns (clock_names, reset_names).
     """
     import re
-    clk_hints   = re.compile(r"\bclk\b|\bclock\b", re.IGNORECASE)
-    rst_hints   = re.compile(r"\brst\b|\breset\b|\bclr\b|\bclear\b", re.IGNORECASE)
+    clk_hints   = re.compile(r"clk|clock", re.IGNORECASE)
+    rst_hints   = re.compile(r"rst|reset|clr|clear", re.IGNORECASE)
 
     clocks, resets = [], []
     if not modules:
