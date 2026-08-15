@@ -31,8 +31,8 @@ from pathlib import Path
 # ── Internal imports ──────────────────────────────────────────────────────────
 from analyzer.ast_engine    import analyze_rtl
 from analyzer.slang_frontend import run_slang_frontend
-from augmentation.report    import build_report
-from augmentation.generator import generate_testbench
+from automation.report    import build_report
+from automation.generator import generate_testbench
 
 
 # ── File collection ───────────────────────────────────────────────────────────
