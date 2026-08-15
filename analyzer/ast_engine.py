@@ -624,6 +624,7 @@ def analyze_rtl(source_text: str, file_name: str = "pasted_input.sv") -> Dict:
     return {
         "file": file_name,
         "modules": [asdict(m) for m in all_modules_out],
+        "port_widths": {name: all_widths[name] for name in all_widths},
         "hierarchy_edges": hierarchy_edges,
         "conditions": [asdict(c) for c in all_condition_nodes],
         "type_a": type_a, "type_b": type_b, "type_c": type_c,

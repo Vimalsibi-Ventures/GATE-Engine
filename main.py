@@ -1,100 +1,231 @@
+"""
+main.py — RTL Analyser + Augmentation Engine CLI
+=================================================
+Usage
+-----
+Single file:
+    python main.py path/to/design.sv
+
+Directory (all .sv / .v files collected recursively):
+    python main.py path/to/rtl_project/
+
+Multiple explicit files:
+    python main.py file1.sv file2.sv file3.v
+
+Output
+------
+results/<project_name>_YYYYMMDD_HHMMSS/
+    rtl_analysis_output.json
+    augmentation_report.json
+    augmented_tb.sv
+"""
+
 import os
 import sys
 import json
-import pandas as pd
+import glob
+import textwrap
+from datetime import datetime
+from pathlib import Path
 
-from analyzer.slang_frontend import run_slang_frontend, print_slang_report
-from analyzer.ast_engine import analyze_rtl
+# ── Internal imports ──────────────────────────────────────────────────────────
+from analyzer.ast_engine    import analyze_rtl
+from analyzer.slang_frontend import run_slang_frontend
+from augmentation.report    import build_report
+from augmentation.generator import generate_testbench
 
-def to_df(rows):
-    cols = ["condition_id", "module", "always_block", "line", "column",
-            "condition", "effective_condition", "fan_in", "reason"]
-    if not rows:
-        return pd.DataFrame(columns=cols)
-    
-    dict_rows = []
-    for r in rows:
-        fan = ", ".join(
-            f"{s['name']}({s['category']}" + (f"->{s['resolved_module']}.{s['resolved_role']})" if s.get("resolved_module") else ")")
-            for s in r["fan_in"]
-        )
-        dict_rows.append({
-            "condition_id": r["condition_id"],
-            "module": r["module"],
-            "always_block": r["always_block"],
-            "line": r["line"],
-            "column": r["column"],
-            "condition": r["condition"],
-            "effective_condition": r["effective_condition"],
-            "fan_in": fan,
-            "reason": r["reason"],
-        })
-    return pd.DataFrame(dict_rows)
 
-def main():
-    print("="*78)
-    print(" RTL Analysis Engine - CLI ")
-    print("="*78)
+# ── File collection ───────────────────────────────────────────────────────────
 
-    if len(sys.argv) > 1:
-        file_path = sys.argv[1]
-    else:
-        file_path = input("Enter the path to your .v or .sv file: ").strip().strip('"').strip("'")
+SUPPORTED_EXT = {".sv", ".v"}
 
-    if not os.path.isfile(file_path):
-        print(f"Error: File '{file_path}' not found.")
+def collect_files(args: list[str]) -> list[str]:
+    """
+    Accept: one directory, one file, or multiple files.
+    Returns sorted list of absolute paths to .sv / .v files.
+    """
+    files = []
+    for arg in args:
+        p = Path(arg).resolve()
+        if p.is_dir():
+            for ext in SUPPORTED_EXT:
+                files.extend(p.rglob(f"*{ext}"))
+        elif p.is_file():
+            if p.suffix in SUPPORTED_EXT:
+                files.append(p)
+            else:
+                print(f"[warn] Skipping unsupported file type: {p}")
+        else:
+            print(f"[warn] Path not found: {p}")
+    # Deduplicate and sort
+    seen, out = set(), []
+    for f in sorted(files):
+        if f not in seen:
+            seen.add(f)
+            out.append(str(f))
+    return out
+
+
+# ── Project name derivation ───────────────────────────────────────────────────
+
+def derive_project_name(args: list[str], files: list[str]) -> str:
+    """
+    If input is a directory → use directory name.
+    If single file → use file stem.
+    If multiple files → use common parent directory name, else 'project'.
+    """
+    if not files:
+        return "project"
+    p0 = Path(args[0]).resolve()
+    if p0.is_dir():
+        return p0.name
+    if len(files) == 1:
+        return Path(files[0]).stem
+    # Multiple files — try common parent
+    parents = {Path(f).parent for f in files}
+    if len(parents) == 1:
+        return parents.pop().name
+    return "project"
+
+
+# ── Results folder ────────────────────────────────────────────────────────────
+
+def make_results_dir(project_name: str, timestamp: str) -> str:
+    folder_name = f"{project_name}_{timestamp}"
+    out_dir = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "results",
+        folder_name,
+    )
+    os.makedirs(out_dir, exist_ok=True)
+    return out_dir
+
+
+# ── Source concatenation ──────────────────────────────────────────────────────
+
+def concatenate_sources(file_paths: list[str]) -> tuple[str, list[str]]:
+    """
+    Read all files, concatenate with file-separator comments so the engine
+    receives one source string while per-file attribution is still possible
+    via line numbers.
+    Returns (combined_source, list_of_paths_that_were_read).
+    """
+    parts = []
+    read_ok = []
+    for fp in file_paths:
+        try:
+            with open(fp, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            parts.append(f"// === FILE: {fp} ===\n{content}\n")
+            read_ok.append(fp)
+        except OSError as e:
+            print(f"[warn] Could not read {fp}: {e}")
+    return "\n".join(parts), read_ok
+
+
+# ── Pretty summary ────────────────────────────────────────────────────────────
+
+def print_summary(analysis: dict, out_dir: str) -> None:
+    s = analysis.get("summary", {})
+    print()
+    print("  ┌─────────────────────────────────────────┐")
+    print("  │           RTL Analysis Summary           │")
+    print("  ├─────────────────────────────────────────┤")
+    print(f"  │  Modules          : {s.get('num_modules', 0):<20} │")
+    print(f"  │  Sequential blocks: {s.get('num_sequential_blocks', 0):<20} │")
+    print(f"  │  Conditions found : {s.get('num_conditions', 0):<20} │")
+    print(f"  │    Type A         : {s.get('type_a_count', 0):<20} │")
+    print(f"  │    Type B         : {s.get('type_b_count', 0):<20} │")
+    print(f"  │    Type C         : {s.get('type_c_count', 0):<20} │")
+    print(f"  │  FSM registers    : {s.get('num_fsm_registers', 0):<20} │")
+    print(f"  │  Instances        : {s.get('num_instances', 0):<20} │")
+    print("  └─────────────────────────────────────────┘")
+    print()
+    print(f"  Output folder: {out_dir}")
+    print()
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print(textwrap.dedent("""\
+            RTL Analyser + Augmentation Engine
+            -----------------------------------
+            Usage:
+              python main.py <file.sv>
+              python main.py <rtl_directory/>
+              python main.py file1.sv file2.sv ...
+        """))
         sys.exit(1)
 
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-        source = f.read()
+    args = sys.argv[1:]
 
-    file_name = os.path.basename(file_path)
+    # 1. Collect files
+    files = collect_files(args)
+    if not files:
+        print("[error] No .sv / .v files found.")
+        sys.exit(1)
 
-    print("\n" + "=" * 78)
-    print("STAGE 1a  —  Slang setup & parse")
-    print("=" * 78)
-    slang_result = run_slang_frontend(source)
-    print_slang_report(slang_result)
+    project_name = derive_project_name(args, files)
+    timestamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir      = make_results_dir(project_name, timestamp)
 
-    print("\n" + "=" * 78)
-    print("STAGE 1b  —  AST traversal & classification")
-    print("=" * 78)
-    result = analyze_rtl(source, file_name=file_name)
-    print(json.dumps(result["summary"], indent=2))
+    print()
+    print(f"  Project  : {project_name}")
+    print(f"  Files    : {len(files)}")
+    for f in files:
+        print(f"             {f}")
+    print(f"  Output   : {out_dir}")
+    print()
 
-    print("\n--- MODULE HIERARCHY ---")
-    if not result["hierarchy_edges"]:
-        print("  (no instantiations found)")
-    for e in result["hierarchy_edges"]:
-        resolved = "" if e["child_resolved"] else "  [unresolved/external]"
-        print(f"  {e['parent_module']} --instantiates--> {e['instance_name']} : {e['child_module']}{resolved}  (line {e['line']})")
+    # 2. Concatenate sources
+    source, read_files = concatenate_sources(files)
+    if not source.strip():
+        print("[error] All source files were empty or unreadable.")
+        sys.exit(1)
 
-    # Configure pandas to look good in a wide terminal
-    pd.set_option('display.max_columns', None)
-    pd.set_option('display.width', 1000)
+    # 3. Optional slang validation (non-fatal)
+    print("  [slang]      validating syntax...")
+    try:
+        slang_result = run_slang_frontend(source)
+        diags = slang_result.get("diagnostics", [])
+        if diags:
+            print(f"  [slang]      {len(diags)} diagnostic(s) — see rtl_analysis_output.json")
+        else:
+            print("  [slang]      OK")
+    except Exception as e:
+        print(f"  [slang]      skipped ({e})")
+        diags = []
 
-    print("\nType A — Pure Combinational")
-    print(to_df(result["type_a"]))
-    
-    print("\nType B — Single Register")
-    print(to_df(result["type_b"]))
-    
-    print("\nType C — Complex / Cross-Module")
-    print(to_df(result["type_c"]))
+    # 4. RTL analysis
+    print("  [analyzer]   running AST engine...")
+    analysis = analyze_rtl(source, file_name=", ".join(read_files))
+    analysis["slang_diagnostics"] = diags
 
-    if result["fsm_info"]:
-        print("\nFSM registers")
-        print(pd.DataFrame(result["fsm_info"]))
+    analysis_path = os.path.join(out_dir, "rtl_analysis_output.json")
+    with open(analysis_path, "w", encoding="utf-8") as f:
+        json.dump(analysis, f, indent=2)
+    print(f"  [analyzer]   rtl_analysis_output.json  "
+          f"({analysis['summary']['num_conditions']} conditions)")
 
-    if result["register_dependency_graph"]:
-        print("\nRegister dependency graph")
-        print(pd.DataFrame(result["register_dependency_graph"]))
+    # 5. Augmentation report
+    print("  [report]     building augmentation report...")
+    report = build_report(
+        analysis      = analysis,
+        project_name  = project_name,
+        timestamp     = timestamp,
+        source_files  = read_files,
+        out_dir       = out_dir,
+    )
 
-    out_path = "rtl_analysis_output.json"
-    with open(out_path, "w") as f:
-        json.dump({"slang_frontend": slang_result, **result}, f, indent=2)
-        
-    print(f"\n[SUCCESS] Structured RTL representation saved -> {os.path.abspath(out_path)}")
+    # 6. Testbench generation
+    print("  [generator]  synthesising testbench...")
+    generate_testbench(report, out_dir)
+
+    # 7. Summary
+    print_summary(analysis, out_dir)
+
 
 if __name__ == "__main__":
     main()

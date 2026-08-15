@@ -8,8 +8,15 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Generated Output Files
+# Generated Output — all results go in results/ now
+results/
+
+# Legacy output files (pre-results-folder era)
 rtl_analysis_output.json
+augmentation_report.json
+augmented_tb.sv
+
+# Simulation waveforms / logs
 *.log
 *.fsdb
 *.vcd
